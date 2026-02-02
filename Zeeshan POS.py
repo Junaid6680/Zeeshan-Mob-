@@ -4,147 +4,163 @@ from fpdf import FPDF
 from datetime import datetime
 import os
 
-# --- Page Config ---
-st.set_page_config(page_title="Zeeshan Mobile - Advanced POS", layout="wide")
+# --- Page Settings ---
+st.set_page_config(page_title="Zeeshan Mobile - Pro POS", layout="wide")
 
-# --- File Names for Backup/Storage ---
-BILL_FILE = "bills_data.csv"
-LEDGER_FILE = "ledger_data.csv"
+# --- Database Files ---
+BILL_DATA = "all_sales.csv"
+CUST_DATA = "customers_ledger.csv"
 
-# Load or Initialize Data
-if os.path.exists(BILL_FILE):
-    st.session_state.all_bills = pd.read_csv(BILL_FILE).to_dict('records')
-else:
-    st.session_state.all_bills = []
+# --- Load Data ---
+if 'all_bills' not in st.session_state:
+    if os.path.exists(BILL_DATA):
+        st.session_state.all_bills = pd.read_csv(BILL_DATA).to_dict('records')
+    else:
+        st.session_state.all_bills = []
 
-if os.path.exists(LEDGER_FILE):
-    st.session_state.customer_db = pd.read_csv(LEDGER_FILE, index_index=True).set_index('Name').to_dict('index')
-else:
-    st.session_state.customer_db = {"Walking Customer": {"phone": "-", "balance": 0.0}}
+if 'customer_db' not in st.session_state:
+    if os.path.exists(CUST_DATA):
+        st.session_state.customer_db = pd.read_csv(CUST_DATA).set_index('Name').to_dict('index')
+    else:
+        st.session_state.customer_db = {"Walking Customer": {"phone": "-", "balance": 0.0}}
 
 if 'cart' not in st.session_state:
     st.session_state.cart = []
 
-# --- Helper Functions ---
-def save_data():
-    pd.DataFrame(st.session_state.all_bills).to_csv(BILL_FILE, index=False)
+# --- Functions ---
+def save_to_files():
+    pd.DataFrame(st.session_state.all_bills).to_csv(BILL_DATA, index=False)
     ledger_df = pd.DataFrame.from_dict(st.session_state.customer_db, orient='index').reset_index().rename(columns={'index': 'Name'})
-    ledger_df.to_csv(LEDGER_FILE, index=False)
+    ledger_df.to_csv(CUST_DATA, index=False)
 
-def create_pdf(name, items, total, old_bal, paid):
+def create_pdf(name, items, total, old_bal, paid, bill_id):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
+    pdf.set_font("Arial", 'B', 18)
     pdf.cell(190, 10, "ZEESHAN MOBILE ACCESSORIES", ln=True, align='C')
     pdf.set_font("Arial", '', 10)
-    pdf.cell(190, 5, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
+    pdf.cell(190, 5, f"Bill ID: {bill_id} | Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align='C')
     pdf.ln(10)
+    pdf.set_font("Arial", 'B', 12)
     pdf.cell(100, 10, f"Customer: {name}")
     pdf.ln(10)
     # Table Header
-    pdf.cell(80, 8, "Item", 1); pdf.cell(30, 8, "Qty", 1); pdf.cell(40, 8, "Price", 1); pdf.cell(40, 8, "Total", 1, ln=True)
+    pdf.set_fill_color(200, 200, 200)
+    pdf.cell(70, 8, " Item", 1, 0, 'L', True); pdf.cell(30, 8, "Qty", 1, 0, 'C', True)
+    pdf.cell(45, 8, "Price", 1, 0, 'C', True); pdf.cell(45, 8, "Total", 1, 1, 'C', True)
+    # Rows
+    pdf.set_font("Arial", '', 10)
     for i in items:
-        pdf.cell(80, 8, str(i['Item']), 1); pdf.cell(30, 8, str(i['Qty']), 1); pdf.cell(40, 8, str(i['Price']), 1); pdf.cell(40, 8, str(i['Total']), 1, ln=True)
+        pdf.cell(70, 8, f" {i['Item']}", 1); pdf.cell(30, 8, str(i['Qty']), 1, 0, 'C')
+        pdf.cell(45, 8, str(i['Price']), 1, 0, 'C'); pdf.cell(45, 8, str(i['Total']), 1, 1, 'C')
     pdf.ln(5)
-    pdf.cell(190, 8, f"Grand Total (inc. old bal): {total + old_bal}", ln=True)
-    pdf.cell(190, 8, f"Paid: {paid}", ln=True)
-    pdf.cell(190, 8, f"New Balance: {(total + old_bal) - paid}", ln=True)
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(145, 8, "Bill Total:", 0, 0, 'R'); pdf.cell(45, 8, f"Rs. {total}", 1, 1, 'C')
+    pdf.cell(145, 8, "Old Balance:", 0, 0, 'R'); pdf.cell(45, 8, f"Rs. {old_bal}", 1, 1, 'C')
+    pdf.cell(145, 8, "Paid:", 0, 0, 'R'); pdf.cell(45, 8, f"Rs. {paid}", 1, 1, 'C')
+    pdf.set_text_color(255, 0, 0)
+    pdf.cell(145, 8, "Remaining Ledger:", 0, 0, 'R'); pdf.cell(45, 8, f"Rs. {(total+old_bal)-paid}", 1, 1, 'C')
     return pdf.output(dest='S').encode('latin-1')
 
-# --- UI ---
-st.title("📱 Zeeshan Mobile Advanced POS")
+# --- MAIN UI ---
+st.title("📱 Zeeshan Mobile Pro POS")
 
-tabs = st.tabs(["🛒 Billing", "🔍 Search & Edit", "📊 Monthly Reports", "💾 Backup & Ledger"])
+t1, t2, t3, t4 = st.tabs(["🛒 Billing", "🔍 Search & Edit", "📊 Monthly Sales", "💾 Ledger & Backup"])
 
 # --- TAB 1: BILLING ---
-with tabs[0]:
+with t1:
     c1, c2 = st.columns([1, 2])
     with c1:
-        cust_name = st.selectbox("Select Customer", list(st.session_state.customer_db.keys()))
-        curr_bal = st.session_state.customer_db[cust_name]['balance']
-        st.info(f"Old Balance: Rs. {curr_bal}")
+        st.subheader("Customer")
+        cust_list = list(st.session_state.customer_db.keys())
+        selected_cust = st.selectbox("Search/Select Customer", ["+ Add New"] + cust_list)
         
+        if selected_cust == "+ Add New":
+            new_n = st.text_input("New Name")
+            new_p = st.text_input("New Phone")
+            if st.button("Save New Customer"):
+                st.session_state.customer_db[new_n] = {"phone": new_p, "balance": 0.0}
+                save_to_files()
+                st.rerun()
+        else:
+            curr_bal = st.session_state.customer_db[selected_cust]['balance']
+            st.info(f"Old Balance: Rs. {curr_bal}")
+            
     with c2:
-        it_name = st.text_input("Item Name")
-        ic1, ic2 = st.columns(2)
-        it_qty = ic1.number_input("Qty", min_value=1)
-        it_prc = ic2.number_input("Price", min_value=0)
-        if st.button("Add to Bill"):
-            st.session_state.cart.append({"Item": it_name, "Qty": it_qty, "Price": it_prc, "Total": it_qty*it_prc, "Date": datetime.now().strftime("%Y-%m-%d")})
+        st.subheader("Items")
+        it_name = st.text_input("Item Description")
+        col_q, col_p = st.columns(2)
+        it_qty = col_q.number_input("Qty", min_value=1, step=1)
+        it_prc = col_p.number_input("Price", min_value=0)
+        if st.button("➕ Add to Bill"):
+            st.session_state.cart.append({"Item": it_name, "Qty": it_qty, "Price": it_prc, "Total": it_qty*it_prc})
 
     if st.session_state.cart:
         df_cart = pd.DataFrame(st.session_state.cart)
         st.table(df_cart)
-        total_bill = df_cart['Total'].sum()
-        paid_now = st.number_input("Amount Paid", min_value=0)
+        total_b = df_cart['Total'].sum()
+        paid_b = st.number_input("Amount Paid Now", min_value=0)
         
-        if st.button("Finalize Bill"):
-            bill_id = f"INV-{datetime.now().strftime('%H%M%S')}"
+        if st.button("✅ Finalize Bill"):
+            b_id = f"INV-{datetime.now().strftime('%H%M%S')}"
+            date_s = datetime.now().strftime("%Y-%m-%d")
+            # Save items to all_sales
             for item in st.session_state.cart:
-                item['BillID'] = bill_id
-                item['Customer'] = cust_name
-                st.session_state.all_bills.append(item)
+                item_record = item.copy()
+                item_record.update({"BillID": b_id, "Customer": selected_cust, "Date": date_s})
+                st.session_state.all_bills.append(item_record)
             
-            new_bal = (total_bill + curr_bal) - paid_now
-            st.session_state.customer_db[cust_name]['balance'] = new_bal
-            save_data()
-            st.success(f"Bill Saved! New Balance: {new_bal}")
+            # Update Ledger
+            new_b = (total_b + curr_bal) - paid_b
+            st.session_state.customer_db[selected_cust]['balance'] = new_b
+            save_to_files()
+            
+            # PDF Download
+            pdf_b = create_pdf(selected_cust, st.session_state.cart, total_b, curr_bal, paid_b, b_id)
+            st.download_button("📥 Download Bill PDF", pdf_b, f"Bill_{selected_cust}.pdf", "application/pdf")
+            
             st.session_state.cart = []
-            st.rerun()
+            st.success("Bill Saved & Ledger Updated!")
 
 # --- TAB 2: SEARCH & EDIT ---
-with tabs[1]:
-    st.subheader("Search & Update Bills")
-    df_all = pd.DataFrame(st.session_state.all_bills)
-    if not df_all.empty:
-        search_id = st.text_input("Enter Bill ID or Customer Name to Edit")
-        filtered = df_all[df_all['BillID'].str.contains(search_id, case=False) | df_all['Customer'].str.contains(search_id, case=False)]
-        st.write(filtered)
+with t2:
+    st.subheader("Search Bills")
+    df_history = pd.DataFrame(st.session_state.all_bills)
+    if not df_history.empty:
+        s_query = st.text_input("Enter Customer Name or Bill ID to search")
+        res = df_history[df_history['Customer'].str.contains(s_query, case=False) | df_history['BillID'].str.contains(s_query, case=False)]
+        st.dataframe(res, use_container_width=True)
         
-        if not filtered.empty:
-            st.warning("Editing here will update the bill records. Note: Manually update ledger if amount changes.")
-            if st.button("Delete Selected Bill Records"):
-                st.session_state.all_bills = [b for b in st.session_state.all_bills if b['BillID'] not in filtered['BillID'].values]
-                save_data()
+        if st.button("Clear History (Reset All Sales)"):
+            if st.checkbox("I am sure I want to delete all sales history"):
+                st.session_state.all_bills = []
+                save_to_files()
                 st.rerun()
 
-# --- TAB 3: MONTHLY REPORTS ---
-with tabs[2]:
-    st.subheader("Monthly Item Sales Report")
-    if st.session_state.all_bills:
-        df_report = pd.DataFrame(st.session_state.all_bills)
-        df_report['Date'] = pd.to_datetime(df_report['Date'])
-        df_report['Month'] = df_report['Date'].dt.strftime('%Y-%m')
+# --- TAB 3: MONTHLY SALES ---
+with t3:
+    st.subheader("Monthly Item-wise Report")
+    if not df_history.empty:
+        df_history['Date'] = pd.to_datetime(df_history['Date'])
+        df_history['Month'] = df_history['Date'].dt.strftime('%B %Y')
+        sel_month = st.selectbox("Select Month", df_history['Month'].unique())
         
-        selected_month = st.selectbox("Select Month", df_report['Month'].unique())
-        month_data = df_report[df_report['Month'] == selected_month]
-        
-        # Summary by Item
-        summary = month_data.groupby('Item').agg({'Qty': 'sum', 'Total': 'sum'}).reset_index()
-        st.write(f"### Sales for {selected_month}")
+        m_data = df_history[df_history['Month'] == sel_month]
+        summary = m_data.groupby('Item').agg({'Qty': 'sum', 'Total': 'sum'}).reset_index()
         st.table(summary)
-        st.metric("Total Monthly Revenue", f"Rs. {summary['Total'].sum()}")
+        st.metric("Total Sale of Month", f"Rs. {summary['Total'].sum()}")
 
-# --- TAB 4: BACKUP & LEDGER ---
-with tabs[3]:
-    st.subheader("Customer Ledger")
-    led_df = pd.DataFrame.from_dict(st.session_state.customer_db, orient='index').reset_index()
-    st.dataframe(led_df)
+# --- TAB 4: BACKUP ---
+with t4:
+    st.subheader("Full Ledger (Udhaar Record)")
+    full_ledger = pd.DataFrame.from_dict(st.session_state.customer_db, orient='index').reset_index()
+    st.dataframe(full_ledger)
     
     st.divider()
-    st.subheader("System Backup")
+    st.subheader("Download Data Backup")
     c_b1, c_b2 = st.columns(2)
-    with c_b1:
-        if st.session_state.all_bills:
-            csv_bills = pd.DataFrame(st.session_state.all_bills).to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download Bills Backup (CSV)", csv_bills, "bills_backup.csv", "text/csv")
-    with c_b2:
-        csv_ledger = pd.DataFrame(st.session_state.customer_db).to_csv().encode('utf-8')
-        st.download_button("📥 Download Ledger Backup (CSV)", csv_ledger, "ledger_backup.csv", "text/csv")
-
-    if st.button("Add New Customer to System"):
-        new_c = st.text_input("New Customer Name")
-        if st.button("Confirm Add"):
-            st.session_state.customer_db[new_c] = {"phone": "-", "balance": 0.0}
-            save_data()
-            st.success("Added!")
+    sales_csv = pd.DataFrame(st.session_state.all_bills).to_csv(index=False).encode('utf-8')
+    c_b1.download_button("📥 Download All Sales (CSV)", sales_csv, "sales_backup.csv", "text/csv")
+    
+    led_csv = full_ledger.to_csv(index=False).encode('utf-8')
+    c_b2.download_button("📥 Download Ledger (CSV)", led_csv, "ledger_backup.csv", "text/csv")
